@@ -466,33 +466,6 @@ static QVector<Clip*> collect_active_clips(Sequence* s, long playhead, ComposeSe
     bool clip_is_active = false;
     if (c->media() != nullptr && c->media()->get_type() == MEDIA_TYPE_FOOTAGE) {
       clip_is_active = activate_footage_clip(c, playhead, params.texture_failed, audio_track_count);
-
-      // Pre-decode the first frame of upcoming video clips while still inside
-      // the IsActiveAt open_buffer window (~2s before the playhead crosses in).
-      // Without this, the first Cache() call at the boundary wakes the cacher
-      // cold and the render thread stalls until the first frame is decoded —
-      // that stall is the audible/visible stutter at cuts on Windows (#43).
-      //
-      // Gates:
-      //   - wait_for_mutexes && video : RenderThread only, never the GUI
-      //     thread (compose_audio path) or ExportThread. Audio clips are
-      //     filtered out by the params.video guard above.
-      //   - !scrubbing               : playback only. During scrub the user's
-      //     hover dictates which clip to decode.
-      //   - playhead < timeline_in   : the playhead hasn't reached this clip
-      //     yet (we're inside the open_buffer pre-warm window).
-      //   - !IsPrewarmed()           : fire at most once per open cycle to
-      //     avoid hammering shared iGPU decode bandwidth.
-      //
-      // Cache args MUST match the live composite_video_clip call so the queue
-      // lookup hits on the same target_pts when the playhead actually crosses.
-      if (clip_is_active && params.wait_for_mutexes && params.video && !params.scrubbing
-          && playhead < c->timeline_in(true)
-          && c->IsOpen()
-          && !c->IsPrewarmed()) {
-        c->Cache(c->timeline_in(), false, params.nests, params.playback_speed);
-        c->MarkPrewarmed();
-      }
     } else {
       if (c->IsActiveAt(playhead)) {
         if (!c->IsOpen()) c->Open();
@@ -777,7 +750,24 @@ static void composite_video_clip(Clip* c, long playhead, Sequence* s, ComposeSeq
     qWarning() << "composite_video_clip: final_target is null";
     return;
   }
-  if (playhead < c->timeline_in(true) || playhead >= c->timeline_out(true)) return;
+
+  // Past clip end — issue #11: avoid uploading texture for PTS past
+  // timeline_out, which produced stale-frame artifacts.
+  if (playhead >= c->timeline_out(true)) return;
+
+  // Upcoming clip in IsActiveAt's open_buffer window: prefetch the cacher
+  // queue around timeline_in so the playhead crossing the cut hits a queued
+  // frame instead of waking the cacher cold (issue #43). Mirrors Olive base
+  // behavior — commit 7413d8655 broke this when it moved the boundary check
+  // above the Cache call. Cacher::Cache() no-ops cleanly while OpenWorker
+  // is still running (is_valid_state_ false), and is retried every render
+  // frame, so we don't need to gate on cacher state.
+  if (playhead < c->timeline_in(true)) {
+    if (c->media() != nullptr && c->media()->get_type() == MEDIA_TYPE_FOOTAGE) {
+      c->Cache(c->timeline_in(), params.scrubbing, params.nests, params.playback_speed);
+    }
+    return;
+  }
 
   int video_width = c->media_width();
   int video_height = c->media_height();
