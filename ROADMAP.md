@@ -26,6 +26,11 @@ Amber inherits Olive 0.1's greatest strength: everything is where you expect it.
 - ~~Unified timeline (no video/audio split) — merged the `video_area` + `audio_area` widgets into a single `TimelineWidget` with one scrollbar. Track-id semantics (`<0` video, `>=0` audio) and `.ove` format unchanged. Drag-select now spans both sides naturally.~~ (shipped in v1.7.0, #38)
 - ~~Voice-over UX polish — live input VU meter while recording (`RecordingTap` `QIODevice` taps the audio stream and posts peaks to the existing AudioMonitor on the GUI thread). 3-second pre-roll countdown overlay before recording starts.~~ (shipped in v1.7.0, #39)
 
+### 1.7.5 — Shipped
+
+- ~~Contrast slider added to the Hue/Saturation/Brightness color effect (alongside brightness, no longer buried in Color Correction).~~ (shipped in v1.7.5, #50)
+- ~~Unnest no longer overwrites adjacent tracks — track remap now anchors on the inner sequence's actual topmost track instead of assuming V1.~~ (shipped in v1.7.5, #48)
+
 ### 1.8+ — Stretch goals (pending)
 
 Pulled out of 1.7.0 to ship cleanly; revisit for 1.8 or as the next milestone defines.
@@ -40,6 +45,9 @@ Pulled out of 1.7.0 to ship cleanly; revisit for 1.8 or as the next milestone de
 - **Callback-based audio I/O (Qt 6.11)** — `QAudioSink::start()` now accepts a callback for real-time audio processing, replacing QIODevice push/pull. Adopt for audio monitoring and scrub playback — cleaner, lower latency.
 - **PipeWire Bluetooth audio** — Qt 6.11 ships a new PipeWire backend. Test if Bluetooth sink enumeration works; if so, remove the `QT_AUDIO_BACKEND=pulseaudio` workaround in `main.cpp`.
 - **Flatpak / Flathub release** — provide an official Flatpak manifest and publish to Flathub for tighter desktop integration on Linux (file portals, permissions). Complements the existing AppImage. Requires a Flathub account + ongoing manifest maintenance — likely a community contribution. (#41)
+- **Mouse wheel zoom in keyframe / effect controls timeline** — Ctrl+wheel currently zooms the main timeline; same gesture should work inside the keyframe view and effect controls timeline. Small UX fix. (#51)
+- **External editors integration per media type** — right-click → "Open in external editor" with a per-MIME-type editor mapping in Preferences (e.g. images → GIMP, audio → Audacity). Re-imports automatically on file change. (#55)
+- **UI scaling / accessibility** — global font-size multiplier in Preferences for users on high-DPI screens or with vision needs. Qt's `setApplicationFont()` + per-widget icon size setting. (#54)
 
 ## 2.0
 
@@ -85,6 +93,10 @@ Amber 2.0 accepts fragment shaders written in ShaderToy format — the de facto 
 - Color correction tool (curves, scopes — waveform, vectorscope, histogram)
 - Subtitle editor — dedicated floating window for bulk subtitle editing (import is shipped in 1.5.0, this is the full editing UI)
 - **Built-in audio effects** — EQ (parametric), compressor, reverb, delay, chorus, limiter. Incremental — each effect is independent DSP. (#12)
+- **SVG / vector import with layered composition** — import `.svg` as a media type. v1: rasterize the whole SVG to a clip (Qt's `QSvgRenderer` already linked). v2: parse top-level `<g>` groups into separate clips so each layer is independently animatable on its own track. Vector-stays-vector at any zoom (no resolution loss). (#52)
+
+### Editing features (continued)
+- **Adjustable V/A divider in the unified timeline** — restore a draggable divider between video and audio regions, matching original Olive UX. Dropped in 1.7.0's unified timeline rework; revisit as a togglable preference if it can land without re-introducing the maintenance overhead of the old split widgets. (#49)
 
 ### Scopes & monitoring
 
@@ -152,3 +164,4 @@ Features that require major architectural work or are outside the current scope.
 - **2.5D compositing** — per-layer Z-depth with perspective camera. Requires 3D projection matrix in `compose_sequence()`, Z-order per clip, camera node. Major architectural change. (#12)
 - **Text animation** — letter-by-letter, word-by-word, line-by-line transforms + typewriter effect. Requires a mini animation engine within the text effect. (#12)
 - **2.5D motion tracker** — point/planar tracking with compositing integration. Requires optical flow or feature matching (CPU-bound). (#12)
+- **AI-based video upscaling** — model-driven upscale (Real-ESRGAN, Anime4K class). Conflicts with Amber's lightweight footprint (sub-3 MB binary, ~70 MB idle RAM) — would pull in PyTorch/ONNX/ncnn runtime. Realistically a separate companion tool that pre-processes media into an upscaled file Amber imports normally, rather than an in-app effect. (#53)
