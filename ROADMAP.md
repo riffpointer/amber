@@ -93,7 +93,7 @@ Amber 2.0 accepts fragment shaders written in ShaderToy format — the de facto 
 - Color correction tool (curves, scopes — waveform, vectorscope, histogram)
 - Subtitle editor — dedicated floating window for bulk subtitle editing (import is shipped in 1.5.0, this is the full editing UI)
 - **Built-in audio effects** — EQ (parametric), compressor, reverb, delay, chorus, limiter. Incremental — each effect is independent DSP. (#12)
-- **SVG / vector import with layered composition** — import `.svg` as a media type. v1: rasterize the whole SVG to a clip (Qt's `QSvgRenderer` already linked). v2: parse top-level `<g>` groups into separate clips so each layer is independently animatable on its own track. Vector-stays-vector at any zoom (no resolution loss). (#52)
+- **Layered media import (SVG / XCF / KRA / PSD)** — import layered source files as a media type, with each top-level layer/group exposed as a separately animatable clip on its own track (Photoshop → After Effects-style workflow). v1: SVG only (`<g>` groups via Qt's `QSvgRenderer`, already linked). v2: GIMP `.xcf` and Krita `.kra` (KRA = ZIP of merged-layer PNGs, easy; XCF needs a parser — possibly via `libgimp` or a Qt port). PSD via QImage plugin. Per-layer transparency + blend mode preserved. SVG keeps vector-precision at any zoom. (#52)
 
 ### Editing features (continued)
 - **Adjustable V/A divider in the unified timeline** — restore a draggable divider between video and audio regions, matching original Olive UX. Dropped in 1.7.0's unified timeline rework; revisit as a togglable preference if it can land without re-introducing the maintenance overhead of the old split widgets. (#49)
