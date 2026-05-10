@@ -3,6 +3,7 @@ layout(std140, binding = 1) uniform FragParams {
     float hue;
     float saturation;
     float brightness;
+    float contrast;
 };
 layout(binding = 2) uniform sampler2D myTexture;
 layout(location = 0) in vec2 vTexCoord;
@@ -33,6 +34,7 @@ void main(void) {
 	hsv.b *= (brightness*0.01);
 
 	vec3 rgb = hsv2rgb(hsv);
+	rgb = (rgb - 0.5) * (contrast*0.01) + 0.5;
 
 	fragColor = vec4(
 		rgb.r,
