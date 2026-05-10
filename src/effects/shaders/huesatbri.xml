@@ -9,5 +9,8 @@
 	<row name="Brightness">
 		<field type="double" min="0" default="100" id="brightness"/>
 	</row>
+	<row name="Contrast">
+		<field type="double" min="0" default="100" id="contrast"/>
+	</row>
 	<shader vert="common.vert" frag="huesatbri.frag"/>
 </effect>
