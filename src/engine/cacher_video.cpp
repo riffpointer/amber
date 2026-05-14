@@ -409,18 +409,20 @@ int Cacher::RetrieveFrameFromDecoder(AVFrame* f) {
   }
 
   // If the frame is in hardware format, transfer to software
-  if (result >= 0 && hw_device_ctx != nullptr && f->format != AV_PIX_FMT_NONE
-      && av_pix_fmt_desc_get(static_cast<AVPixelFormat>(f->format))->flags & AV_PIX_FMT_FLAG_HWACCEL) {
-    AVFrame* sw_frame = av_frame_alloc();
-    if (av_hwframe_transfer_data(sw_frame, f, 0) < 0) {
-      qWarning() << "Failed to transfer hw frame to software";
-      av_frame_free(&sw_frame);
-      result = AVERROR(ENOTSUP);
-    } else {
-      av_frame_copy_props(sw_frame, f);
-      av_frame_unref(f);
-      av_frame_move_ref(f, sw_frame);
-      av_frame_free(&sw_frame);
+  if (result >= 0 && hw_device_ctx != nullptr && f->format != AV_PIX_FMT_NONE) {
+    const AVPixFmtDescriptor* desc = av_pix_fmt_desc_get(static_cast<AVPixelFormat>(f->format));
+    if (desc != nullptr && (desc->flags & AV_PIX_FMT_FLAG_HWACCEL)) {
+      AVFrame* sw_frame = av_frame_alloc();
+      if (av_hwframe_transfer_data(sw_frame, f, 0) < 0) {
+        qWarning() << "Failed to transfer hw frame to software";
+        av_frame_free(&sw_frame);
+        result = AVERROR(ENOTSUP);
+      } else {
+        av_frame_copy_props(sw_frame, f);
+        av_frame_unref(f);
+        av_frame_move_ref(f, sw_frame);
+        av_frame_free(&sw_frame);
+      }
     }
   }
 
