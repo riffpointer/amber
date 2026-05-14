@@ -86,19 +86,11 @@ int FieldTypeFromString(const QString& type_str) {
 }
 
 // Find the EffectField matching the "id" attribute in `stream` across all rows of `effect`.
-// Returns nullptr if no field with the requested id exists in any row. Searching across all
-// rows (rather than just the row at the current XML position) makes load() resilient to row
-// reordering or insertion between project save and load (e.g. new fields added to an effect
-// in a later release).
-EffectField* FindFieldInEffectByStreamId(QXmlStreamReader& stream, const QVector<EffectRow*>& rows) {
+// Returns nullptr if no field with the requested id exists in any row.
+EffectField* FindFieldInEffectByStreamId(QXmlStreamReader& stream, Effect* effect) {
   for (const auto& attr : stream.attributes()) {
     if (attr.name() == QLatin1String("id")) {
-      for (EffectRow* row : rows) {
-        for (int l = 0; l < row->FieldCount(); l++) {
-          if (row->Field(l)->id() == attr.value()) return row->Field(l);
-        }
-      }
-      break;
+      return effect->FindFieldById(attr.value());
     }
   }
   return nullptr;
@@ -138,12 +130,11 @@ EffectKeyframe ParseKeyframe(QXmlStreamReader& stream, EffectField* field) {
 }
 
 // Load a single <field> element (including nested <key> children) from `stream`.
-// Looks up the target field by id across every row in `rows`, not just the row at the current
-// XML position. This fixes a bug where fields written to row N in the saved project but
-// belonging to row M at load time would be silently dropped (or worse, written to the wrong
-// field at row N).
-void LoadFieldElement(QXmlStreamReader& stream, const QVector<EffectRow*>& rows) {
-  EffectField* field = FindFieldInEffectByStreamId(stream, rows);
+// Looks up the target field by id across every row in `effect`, not just the row at the
+// current XML position. This makes load() resilient to row reordering or insertion between
+// project save and load.
+void LoadFieldElement(QXmlStreamReader& stream, Effect* effect) {
+  EffectField* field = FindFieldInEffectByStreamId(stream, effect);
   if (field == nullptr) return;
 
   ApplyFieldValue(stream, field);
@@ -160,11 +151,11 @@ void LoadFieldElement(QXmlStreamReader& stream, const QVector<EffectRow*>& rows)
 }
 
 // Load a single <row> element (including nested <field> children) from `stream`.
-void LoadRowElement(QXmlStreamReader& stream, const QVector<EffectRow*>& rows) {
+void LoadRowElement(QXmlStreamReader& stream, Effect* effect) {
   while (!stream.atEnd() && !(stream.name() == QLatin1String("row") && stream.isEndElement())) {
     stream.readNext();
     if (stream.name() == QLatin1String("field") && stream.isStartElement()) {
-      LoadFieldElement(stream, rows);
+      LoadFieldElement(stream, effect);
     }
   }
 }
@@ -555,6 +546,18 @@ EffectRow* Effect::row(int i) { return rows.at(i); }
 
 int Effect::row_count() { return rows.size(); }
 
+EffectField* Effect::FindFieldById(QStringView id) {
+  for (EffectRow* row : rows) {
+    for (int i = 0; i < row->FieldCount(); i++) {
+      EffectField* field = row->Field(i);
+      if (field->id() == id) {
+        return field;
+      }
+    }
+  }
+  return nullptr;
+}
+
 EffectGizmo* Effect::add_gizmo(int type) {
   EffectGizmo* gizmo = new EffectGizmo(this, type);
   gizmos.append(gizmo);
@@ -675,7 +678,7 @@ void Effect::load(QXmlStreamReader& stream) {
       // Field lookup inside LoadRowElement searches all rows by id, so row order in the saved
       // project no longer has to match the in-code row order. This makes load() forward- and
       // backward-compatible with effects that gain or reorder rows between releases.
-      LoadRowElement(stream, rows);
+      LoadRowElement(stream, this);
     } else if (stream.isStartElement()) {
       custom_load(stream);
     }

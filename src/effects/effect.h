@@ -153,6 +153,14 @@ class Effect : public QObject {
   EffectRow* row(int i);
   int row_count();
 
+  /**
+   * @brief Find a field by its id across all rows
+   *
+   * Iterates every row's fields and returns the first one whose id matches the
+   * provided value. Returns nullptr if no matching field exists.
+   */
+  EffectField* FindFieldById(QStringView id);
+
   EffectGizmo* add_gizmo(int type);
   EffectGizmo* gizmo(int i);
   int gizmo_count();
