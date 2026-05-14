@@ -395,6 +395,18 @@ EffectRow* Effect::row(int i) { return rows.at(i); }
 
 int Effect::row_count() { return rows.size(); }
 
+EffectField* Effect::FindFieldById(QStringView id) {
+  for (EffectRow* row : rows) {
+    for (int i = 0; i < row->FieldCount(); i++) {
+      EffectField* field = row->Field(i);
+      if (field->id() == id) {
+        return field;
+      }
+    }
+  }
+  return nullptr;
+}
+
 EffectGizmo* Effect::add_gizmo(int type) {
   EffectGizmo* gizmo = new EffectGizmo(this, type);
   gizmos.append(gizmo);
@@ -523,15 +535,7 @@ void Effect::load(QXmlStreamReader& stream) {
           for (int k = 0; k < stream.attributes().size(); k++) {
             const QXmlStreamAttribute& attr = stream.attributes().at(k);
             if (attr.name() == QLatin1String("id")) {
-              for (int r = 0; r < rows.size() && !found_field; r++) {
-                EffectRow* row = rows.at(r);
-                for (int l = 0; l < row->FieldCount(); l++) {
-                  if (row->Field(l)->id() == attr.value()) {
-                    found_field = row->Field(l);
-                    break;
-                  }
-                }
-              }
+              found_field = FindFieldById(attr.value());
               break;
             }
           }
