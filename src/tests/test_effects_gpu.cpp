@@ -704,23 +704,40 @@ void TestEffectsGpu::boxblurSolidColor() {
 }
 
 void TestEffectsGpu::boxblurNonZero() {
-  // Pattern B: gradient + radius=10 must change output meaningfully.
+  // Shape-aware: SOLID checkerboard (size=16 → 4×4 cells of 16 px on 64×64).
+  // Cell (0,0) is black, cell (1,0) is white. Pixels just inside each cell at
+  // x=15 / x=17 are pure black / white in baseline. A real box blur with
+  // radius=8 mixes both cells → both pixels land in mid-luma. A passthrough-
+  // regressed shader would leave 0 / 255, failing the [60,200] bound.
   auto seq = h_->make_sequence(64, 64, 30.0);
-  Clip* c = h_->add_generator_clip(seq.get(), -1, 0, 30, EFFECT_INTERNAL_GRADIENT);
-  Effect* gradient = c->effects[1].get();
-  h_->set_field_color(gradient, 1, 0, QColor(Qt::black));
-  h_->set_field_color(gradient, 2, 0, QColor(Qt::white));
-  h_->set_field_double(gradient, 3, 0, 90.0);
-  QByteArray baseline = h_->render_frame(seq.get(), 0);
+  Clip* c = h_->add_generator_clip(seq.get(), -1, 0, 30, EFFECT_INTERNAL_SOLID);
+  Effect* solid = c->effects[1].get();
+  h_->set_field_combo(solid, 0, 0, 2);  // Type = SOLID_TYPE_CHECKERBOARD
+  h_->set_field_color(solid, 2, 0, QColor(Qt::white));  // even cells; odd cells hardcoded black
+  h_->set_field_double(solid, 3, 0, 16.0);  // cell size 16 px
 
   EffectPtr fx = h_->attach_xml_shader(c, "Box Blur");
-  h_->set_field_double(fx.get(), 0, 0, 10.0);
-  QByteArray with_fx = h_->render_frame(seq.get(), 0);
+  h_->set_field_double(fx.get(), 0, 0, 8.0);  // radius
+  QByteArray pixels = h_->render_frame(seq.get(), 0);
 
-  // 10-px blur on a vertical gradient redistributes intensity at the edges.
-  // 1000 is a generous lower bound (calibration: empirically much higher).
-  const int diff = buf_diff(baseline, with_fx);
-  QVERIFY2(diff > 1000, qPrintable(QString("expected blur to change output, diff=%1").arg(diff)));
+  // (15,4) is 1 px inside the black cell on its right edge.
+  // (17,4) is 1 px inside the white cell on its left edge.
+  Rgba left = pixel_at(pixels, 64, 15, 4);
+  Rgba right = pixel_at(pixels, 64, 17, 4);
+  const int luma_left = (left.r + left.g + left.b) / 3;
+  const int luma_right = (right.r + right.g + right.b) / 3;
+  QVERIFY2(luma_left >= 60 && luma_left <= 200,
+           qPrintable(QString("expected blurred luma in [60,200] at (15,4), got %1 (RGB=%2,%3,%4)")
+                          .arg(luma_left)
+                          .arg(left.r)
+                          .arg(left.g)
+                          .arg(left.b)));
+  QVERIFY2(luma_right >= 60 && luma_right <= 200,
+           qPrintable(QString("expected blurred luma in [60,200] at (17,4), got %1 (RGB=%2,%3,%4)")
+                          .arg(luma_right)
+                          .arg(right.r)
+                          .arg(right.g)
+                          .arg(right.b)));
 }
 
 void TestEffectsGpu::gaussianblurRadiusZero() {
@@ -758,20 +775,36 @@ void TestEffectsGpu::gaussianblurSolidColor() {
 }
 
 void TestEffectsGpu::gaussianblurNonZero() {
+  // Same checkerboard pattern as boxblurNonZero: sigma=4 must drag pixels
+  // inside the cells (15,4)/(17,4) into mid-luma. Passthrough regression keeps
+  // them at 0/255.
   auto seq = h_->make_sequence(64, 64, 30.0);
-  Clip* c = h_->add_generator_clip(seq.get(), -1, 0, 30, EFFECT_INTERNAL_GRADIENT);
-  Effect* gradient = c->effects[1].get();
-  h_->set_field_color(gradient, 1, 0, QColor(Qt::black));
-  h_->set_field_color(gradient, 2, 0, QColor(Qt::white));
-  h_->set_field_double(gradient, 3, 0, 90.0);
-  QByteArray baseline = h_->render_frame(seq.get(), 0);
+  Clip* c = h_->add_generator_clip(seq.get(), -1, 0, 30, EFFECT_INTERNAL_SOLID);
+  Effect* solid = c->effects[1].get();
+  h_->set_field_combo(solid, 0, 0, 2);  // Type = SOLID_TYPE_CHECKERBOARD
+  h_->set_field_color(solid, 2, 0, QColor(Qt::white));
+  h_->set_field_double(solid, 3, 0, 16.0);
 
   EffectPtr fx = h_->attach_xml_shader(c, "Gaussian Blur");
-  h_->set_field_double(fx.get(), 0, 0, 5.0);
-  QByteArray with_fx = h_->render_frame(seq.get(), 0);
+  h_->set_field_double(fx.get(), 0, 0, 4.0);  // sigma
+  QByteArray pixels = h_->render_frame(seq.get(), 0);
 
-  const int diff = buf_diff(baseline, with_fx);
-  QVERIFY2(diff > 1000, qPrintable(QString("expected blur to change output, diff=%1").arg(diff)));
+  Rgba left = pixel_at(pixels, 64, 15, 4);
+  Rgba right = pixel_at(pixels, 64, 17, 4);
+  const int luma_left = (left.r + left.g + left.b) / 3;
+  const int luma_right = (right.r + right.g + right.b) / 3;
+  QVERIFY2(luma_left >= 60 && luma_left <= 200,
+           qPrintable(QString("expected blurred luma in [60,200] at (15,4), got %1 (RGB=%2,%3,%4)")
+                          .arg(luma_left)
+                          .arg(left.r)
+                          .arg(left.g)
+                          .arg(left.b)));
+  QVERIFY2(luma_right >= 60 && luma_right <= 200,
+           qPrintable(QString("expected blurred luma in [60,200] at (17,4), got %1 (RGB=%2,%3,%4)")
+                          .arg(luma_right)
+                          .arg(right.r)
+                          .arg(right.g)
+                          .arg(right.b)));
 }
 
 void TestEffectsGpu::directionalblurRadiusZero() {
@@ -809,21 +842,54 @@ void TestEffectsGpu::directionalblurSolidColor() {
 }
 
 void TestEffectsGpu::directionalblurNonZero() {
+  // SMPTE bars input breaks checkerboard row-symmetry so we can witness 1D
+  // directionality. Top zone (y < 43) has pure vertical stripes of width 10:
+  //   x∈[0,10) grey (192,192,192), x∈[10,20) yellow (192,192,0), …
+  // Horizontal blur (angle=0) crosses the grey↔yellow boundary at x=10 →
+  // blue channel drops at (9,10) (mixes grey B=192 with yellow B=0).
+  // Vertical blur (angle=90) at the same x=9 only samples grey along Y → B
+  // stays ≈ 192. Two renders, two assertions: directionality is proven.
   auto seq = h_->make_sequence(64, 64, 30.0);
-  Clip* c = h_->add_generator_clip(seq.get(), -1, 0, 30, EFFECT_INTERNAL_GRADIENT);
-  Effect* gradient = c->effects[1].get();
-  h_->set_field_color(gradient, 1, 0, QColor(Qt::black));
-  h_->set_field_color(gradient, 2, 0, QColor(Qt::white));
-  h_->set_field_double(gradient, 3, 0, 90.0);
-  QByteArray baseline = h_->render_frame(seq.get(), 0);
+  Clip* c = h_->add_generator_clip(seq.get(), -1, 0, 30, EFFECT_INTERNAL_SOLID);
+  Effect* solid = c->effects[1].get();
+  h_->set_field_combo(solid, 0, 0, 1);  // Type = SOLID_TYPE_BARS
 
   EffectPtr fx = h_->attach_xml_shader(c, "Directional Blur");
-  h_->set_field_double(fx.get(), 0, 0, 15.0);  // length
-  h_->set_field_double(fx.get(), 1, 0, 45.0);
-  QByteArray with_fx = h_->render_frame(seq.get(), 0);
+  h_->set_field_double(fx.get(), 0, 0, 10.0);  // blur_len
+  h_->set_field_double(fx.get(), 1, 0, 0.0);   // angle = 0° → horizontal
+  QByteArray horiz = h_->render_frame(seq.get(), 0);
 
-  const int diff = buf_diff(baseline, with_fx);
-  QVERIFY2(diff > 1000, qPrintable(QString("expected blur to change output, diff=%1").arg(diff)));
+  // (9,10): grey side, 1 px before the yellow boundary. Horizontal kernel
+  // reaches into yellow (B=0) → B drops below 150. Passthrough keeps B=192.
+  Rgba h_a = pixel_at(horiz, 64, 9, 10);
+  QVERIFY2(h_a.b < 150,
+           qPrintable(QString("expected horizontal blur to pull B<150 at (9,10), got RGB=%1,%2,%3")
+                          .arg(h_a.r)
+                          .arg(h_a.g)
+                          .arg(h_a.b)));
+  // (9,35): same column, deeper Y but still in top-zone (first_bar_height≈43).
+  // SMPTE bars are row-invariant in this band so horizontal blur sees the
+  // identical X-pattern → B again drops. Confirms blur is X-uniform.
+  Rgba h_b = pixel_at(horiz, 64, 9, 35);
+  QVERIFY2(h_b.b < 150,
+           qPrintable(QString("expected horizontal blur to pull B<150 at (9,35), got RGB=%1,%2,%3")
+                          .arg(h_b.r)
+                          .arg(h_b.g)
+                          .arg(h_b.b)));
+
+  // Second render: same clip, change angle to 90° → vertical blur.
+  h_->set_field_double(fx.get(), 1, 0, 90.0);
+  QByteArray vert = h_->render_frame(seq.get(), 0);
+
+  // (9,10) under vertical blur: kernel samples column 9 (grey) along Y for
+  // [0, 20], all grey (top-zone runs to y≈43). B stays ≈ 192. Directionality
+  // witness: angle=0 dropped B, angle=90 leaves it intact.
+  Rgba v_a = pixel_at(vert, 64, 9, 10);
+  QVERIFY2(v_a.b > 150,
+           qPrintable(QString("expected vertical blur to leave B>150 at (9,10), got RGB=%1,%2,%3")
+                          .arg(v_a.r)
+                          .arg(v_a.g)
+                          .arg(v_a.b)));
 }
 
 void TestEffectsGpu::radialblurRadiusZero() {
@@ -860,20 +926,56 @@ void TestEffectsGpu::radialblurSolidColor() {
 }
 
 void TestEffectsGpu::radialblurNonZero() {
+  // White-on-black checkerboard, cell size 13. Radial blur centred at image
+  // pixel (20, 6) — sits in WHITE cell (1, 0). Radius=20 makes the kernel
+  // integrate ~3 taps across a ~2 px window along the radial direction.
+  //
+  // The previous "alpha < 10 at image centre" witness was wrong: gl_FragCoord
+  // is half-pixel offset, so even at the image centre `distance` is (0.5, 0.5)
+  // and the loop runs at least once — the shader never emits a clean vec4(0).
+  // Instead we pick two pixels straddling cell boundaries so the kernel
+  // integrates WHITE+BLACK; a passthrough regression would return the exact
+  // cell colour at each pixel (luma=255 or 0).
   auto seq = h_->make_sequence(64, 64, 30.0);
-  Clip* c = h_->add_generator_clip(seq.get(), -1, 0, 30, EFFECT_INTERNAL_GRADIENT);
-  Effect* gradient = c->effects[1].get();
-  h_->set_field_color(gradient, 1, 0, QColor(Qt::black));
-  h_->set_field_color(gradient, 2, 0, QColor(Qt::white));
-  h_->set_field_double(gradient, 3, 0, 90.0);
-  QByteArray baseline = h_->render_frame(seq.get(), 0);
+  Clip* c = h_->add_generator_clip(seq.get(), -1, 0, 30, EFFECT_INTERNAL_SOLID);
+  Effect* solid = c->effects[1].get();
+  h_->set_field_combo(solid, 0, 0, 2);  // Type = SOLID_TYPE_CHECKERBOARD
+  h_->set_field_color(solid, 2, 0, QColor(Qt::white));
+  h_->set_field_double(solid, 3, 0, 13.0);
 
   EffectPtr fx = h_->attach_xml_shader(c, "Radial Blur");
-  h_->set_field_double(fx.get(), 0, 0, 50.0);  // radius
-  QByteArray with_fx = h_->render_frame(seq.get(), 0);
+  h_->set_field_double(fx.get(), 0, 0, 20.0);    // radius (pixel-scaled, gives ~3-tap kernel near edges)
+  h_->set_field_double(fx.get(), 1, 0, -12.0);   // center_x: image centre + (-12) = pixel 20
+  h_->set_field_double(fx.get(), 1, 1, -26.0);   // center_y: image centre + (-26) = pixel 6
+  QByteArray pixels = h_->render_frame(seq.get(), 0);
 
-  const int diff = buf_diff(baseline, with_fx);
-  QVERIFY2(diff > 1000, qPrintable(QString("expected radial blur to change output, diff=%1").arg(diff)));
+  // Witness 1: pixel (20, 12). In WHITE cell (1, 0). Radial direction from
+  // (20, 6) is straight +Y. Kernel reaches y≈14 → bleeds into BLACK cell
+  // (1, 1) at y>=13. Expected luma ≈ 170 (two WHITE taps + one BLACK).
+  // Passthrough returns WHITE (255) → fails the <220 bound.
+  Rgba w1 = pixel_at(pixels, 64, 20, 12);
+  const int luma_w1 = (w1.r + w1.g + w1.b) / 3;
+  QVERIFY2(luma_w1 > 30 && luma_w1 < 220,
+           qPrintable(QString("expected radial smear at (20,12) — 30<luma<220, got RGBA=%1,%2,%3,%4 (luma=%5)")
+                          .arg(w1.r)
+                          .arg(w1.g)
+                          .arg(w1.b)
+                          .arg(w1.a)
+                          .arg(luma_w1)));
+
+  // Witness 2: pixel (26, 6). In BLACK cell (2, 0). Radial direction from
+  // (20, 6) is straight +X. Kernel reaches x≈24 → bleeds into WHITE cell
+  // (1, 0) at x<26. Expected luma ≈ 85-127 (one BLACK + one boundary + one
+  // WHITE tap). Passthrough returns BLACK (0) → fails the >30 bound.
+  Rgba w2 = pixel_at(pixels, 64, 26, 6);
+  const int luma_w2 = (w2.r + w2.g + w2.b) / 3;
+  QVERIFY2(luma_w2 > 30 && luma_w2 < 220,
+           qPrintable(QString("expected radial smear at (26,6) — 30<luma<220, got RGBA=%1,%2,%3,%4 (luma=%5)")
+                          .arg(w2.r)
+                          .arg(w2.g)
+                          .arg(w2.b)
+                          .arg(w2.a)
+                          .arg(luma_w2)));
 }
 
 // ---------------------------------------------------------------------------
