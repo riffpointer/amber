@@ -516,8 +516,9 @@ void TestEffectsGpu::subtitleActiveEntry() {
   QByteArray after = h_->render_frame(seq.get(), 30);
   QVERIFY(!after.isEmpty());
   const int n_after = count_white_pixels(after);
-  // Past the cue, fewer than 25% of the original text-like pixels should remain.
-  QVERIFY2(n_after * 4 < n_text,
+  // Measured leak (frames 28/30/32) on Arch + Qt 6.10 2026-05-16: 0%/0%/0%
+  // (n_text=222, n_after=0). Threshold max(2×, 5%) = 5% → n_after * 20 < n_text.
+  QVERIFY2(n_after * 20 < n_text,
            qPrintable(QString("expected subtitle to clear past cue: inside=%1 after=%2").arg(n_text).arg(n_after)));
 }
 
@@ -1324,46 +1325,72 @@ void TestEffectsGpu::huesatbriSaturationZero() {
 }
 
 void TestEffectsGpu::huesatbriContrast() {
-  // huesatbri contrast: rgb = (rgb-0.5)*(contrast*0.01)+0.5. (128,128,128) is
-  // the contrast fixed-point so use (64,64,64) instead. With contrast=200 (2x),
-  // expected output ≈ (0,0,0). Assert sum-of-deviations from input > 30.
+  // huesatbri contrast: rgb = (rgb-0.5)*(contrast*0.01)+0.5. With contrast=200
+  // (2x) on a black→white vertical gradient, low pixel (y=10, luma≈0.262) is
+  // pushed toward black and high pixel (y=54, luma≈0.749) toward white.
+  // Predicted R 8-bit values: low ≈ 6, high ≈ 254.
   auto seq = h_->make_sequence(64, 64, 30.0);
-  Clip* c = h_->add_generator_clip(seq.get(), -1, 0, 30, EFFECT_INTERNAL_SOLID);
-  h_->set_field_color(c->effects[1].get(), 2, 0, QColor(64, 64, 64, 255));
+  Clip* c = h_->add_generator_clip(seq.get(), -1, 0, 30, EFFECT_INTERNAL_GRADIENT);
+  Effect* gradient = c->effects[1].get();
+  h_->set_field_color(gradient, 1, 0, QColor(Qt::black));
+  h_->set_field_color(gradient, 2, 0, QColor(Qt::white));
+  h_->set_field_double(gradient, 3, 0, 90.0);
 
   EffectPtr fx = h_->attach_xml_shader(c, "Hue/Saturation/Brightness");
   h_->set_field_double(fx.get(), 3, 0, 200.0);  // contrast=200 (row 3)
   QByteArray pixels = h_->render_frame(seq.get(), 0);
 
-  Rgba mid = pixel_at(pixels, 64, 32, 32);
-  const int d = qAbs(mid.r - 64) + qAbs(mid.g - 64) + qAbs(mid.b - 64);
-  QVERIFY2(d > 30, qPrintable(QString("expected contrast push from (64,64,64), got (%1,%2,%3) sum-diff=%4")
-                                  .arg(mid.r)
-                                  .arg(mid.g)
-                                  .arg(mid.b)
-                                  .arg(d)));
+  Rgba low = pixel_at(pixels, 64, 32, 10);
+  Rgba high = pixel_at(pixels, 64, 32, 54);
+  QVERIFY2(low.r < 30,
+           qPrintable(QString("expected contrast push low pixel toward black, low.r=%1").arg(low.r)));
+  QVERIFY2(high.r > 220,
+           qPrintable(QString("expected contrast push high pixel toward white, high.r=%1").arg(high.r)));
 }
 
 void TestEffectsGpu::colorCorrectionShift() {
-  // colorcorrection.xml row 0 = Temperature. Shader uses temp = temperature*0.01.
-  // For temp < 66 → redTemp=1, greenTemp = 0.39*log(temp) - 0.632, blueTemp =
-  // 0.543*log(temp-10) - 1.196. Setting temperature=5000 → temp=50 →
-  // R=1, G≈0.89, B≈0.81: output skews warm, R > G > B.
+  // colorcorrection.xml rows: 0=temperature, 8=saturation, 2=exposure. Three
+  // sub-scopes verify independent shader steps — a passthrough regression
+  // would fail B (R≠G after sat=0 → intensity grey) and C (channels unchanged
+  // by exposure).
   //
-  // The plan suggested temperature=10000 but the shader math shows temp=100
-  // (>=66) gives blueTemp=1 and both R and G reduced — a *cooler* shift, not
-  // warm. Switched to temperature=5000 to actually hit the warm branch.
-  auto seq = h_->make_sequence(64, 64, 30.0);
-  Clip* c = h_->add_generator_clip(seq.get(), -1, 0, 30, EFFECT_INTERNAL_SOLID);
-  h_->set_field_color(c->effects[1].get(), 2, 0, QColor(100, 100, 100, 255));
-
-  EffectPtr fx = h_->attach_xml_shader(c, "Color Correction");
-  h_->set_field_double(fx.get(), 0, 0, 5000.0);  // temperature
-  QByteArray pixels = h_->render_frame(seq.get(), 0);
-
-  Rgba mid = pixel_at(pixels, 64, 32, 32);
-  QVERIFY2(mid.r > mid.g && mid.g > mid.b && (mid.r - mid.b) > 5,
-           qPrintable(QString("expected warm shift R>G>B, got (%1,%2,%3)").arg(mid.r).arg(mid.g).arg(mid.b)));
+  // A. Temperature=5000 → temp=50, warm branch (R=1, G≈0.89, B≈0.81).
+  {
+    auto seq = h_->make_sequence(64, 64, 30.0);
+    Clip* c = h_->add_generator_clip(seq.get(), -1, 0, 30, EFFECT_INTERNAL_SOLID);
+    h_->set_field_color(c->effects[1].get(), 2, 0, QColor(100, 100, 100, 255));
+    EffectPtr fx = h_->attach_xml_shader(c, "Color Correction");
+    h_->set_field_double(fx.get(), 0, 0, 5000.0);  // temperature
+    QByteArray pixels = h_->render_frame(seq.get(), 0);
+    Rgba mid = pixel_at(pixels, 64, 32, 32);
+    QVERIFY2(mid.r > mid.g && mid.g > mid.b && (mid.r - mid.b) > 5,
+             qPrintable(QString("expected warm shift R>G>B, got (%1,%2,%3)").arg(mid.r).arg(mid.g).arg(mid.b)));
+  }
+  // B. Saturation=0 on (200,50,50) → intensity grey via Rec.709 weights
+  //    (0.2125·R + 0.7154·G + 0.0721·B) ≈ 0.321 → ≈ 82 across all channels.
+  {
+    auto seq = h_->make_sequence(64, 64, 30.0);
+    Clip* c = h_->add_generator_clip(seq.get(), -1, 0, 30, EFFECT_INTERNAL_SOLID);
+    h_->set_field_color(c->effects[1].get(), 2, 0, QColor(200, 50, 50, 255));
+    EffectPtr fx = h_->attach_xml_shader(c, "Color Correction");
+    h_->set_field_double(fx.get(), 8, 0, 0.0);  // saturation
+    QByteArray pixels = h_->render_frame(seq.get(), 0);
+    Rgba mid = pixel_at(pixels, 64, 32, 32);
+    QVERIFY2(qAbs(mid.r - mid.g) <= 5 && qAbs(mid.g - mid.b) <= 5,
+             qPrintable(QString("expected sat=0 → grey, got (%1,%2,%3)").arg(mid.r).arg(mid.g).arg(mid.b)));
+  }
+  // C. Exposure=50 on (100,100,100) → rgb *= pow(2, 0.5) ≈ 1.414 → ≈ 141.
+  {
+    auto seq = h_->make_sequence(64, 64, 30.0);
+    Clip* c = h_->add_generator_clip(seq.get(), -1, 0, 30, EFFECT_INTERNAL_SOLID);
+    h_->set_field_color(c->effects[1].get(), 2, 0, QColor(100, 100, 100, 255));
+    EffectPtr fx = h_->attach_xml_shader(c, "Color Correction");
+    h_->set_field_double(fx.get(), 2, 0, 50.0);  // exposure
+    QByteArray pixels = h_->render_frame(seq.get(), 0);
+    Rgba mid = pixel_at(pixels, 64, 32, 32);
+    QVERIFY2(mid.r > 120 && mid.g > 120 && mid.b > 120,
+             qPrintable(QString("expected exposure brighten, got (%1,%2,%3)").arg(mid.r).arg(mid.g).arg(mid.b)));
+  }
 }
 
 void TestEffectsGpu::colorselIsolates() {
@@ -1400,50 +1427,71 @@ void TestEffectsGpu::colorselIsolates() {
 }
 
 void TestEffectsGpu::posterizeReducesLevels() {
-  // Posterize default numColors=8. On a continuous gradient the output has at
-  // most ~8 distinct R values (allow ≤16 for boundary aliasing).
-  auto seq = h_->make_sequence(64, 64, 30.0);
-  Clip* c = h_->add_generator_clip(seq.get(), -1, 0, 30, EFFECT_INTERNAL_GRADIENT);
-  Effect* gradient = c->effects[1].get();
-  h_->set_field_color(gradient, 1, 0, QColor(Qt::black));
-  h_->set_field_color(gradient, 2, 0, QColor(Qt::white));
-  h_->set_field_double(gradient, 3, 0, 90.0);
+  // Posterize with gamma_cent=100 → gamma=1 → output = floor(c·N)/N. Loop
+  // over numColors ∈ {2,4,8}; gradient t-range [0.152, 0.848] yields N (or
+  // N-2) distinct R values per iter. Assert ≤ N+2 to absorb 8-bit boundary
+  // aliasing. Passthrough would produce ~64 distinct values → fails all N.
+  const int test_levels[] = {2, 4, 8};
+  for (int N : test_levels) {
+    auto seq = h_->make_sequence(64, 64, 30.0);
+    Clip* c = h_->add_generator_clip(seq.get(), -1, 0, 30, EFFECT_INTERNAL_GRADIENT);
+    Effect* gradient = c->effects[1].get();
+    h_->set_field_color(gradient, 1, 0, QColor(Qt::black));
+    h_->set_field_color(gradient, 2, 0, QColor(Qt::white));
+    h_->set_field_double(gradient, 3, 0, 90.0);
 
-  h_->attach_xml_shader(c, "Posterize");
-  QByteArray pixels = h_->render_frame(seq.get(), 0);
+    EffectPtr fx = h_->attach_xml_shader(c, "Posterize");
+    h_->set_field_double(fx.get(), 0, 0, double(N));  // numColors
+    h_->set_field_double(fx.get(), 1, 0, 100.0);      // gamma_cent → gamma=1
+    QByteArray pixels = h_->render_frame(seq.get(), 0);
 
-  QSet<int> r_values;
-  for (int i = 0; i + 3 < pixels.size(); i += 4) {
-    r_values.insert(static_cast<uchar>(pixels[i + 0]));
+    QSet<int> r_values;
+    for (int i = 0; i + 3 < pixels.size(); i += 4) {
+      r_values.insert(static_cast<uchar>(pixels[i + 0]));
+    }
+    QVERIFY2(r_values.size() <= N + 2,
+             qPrintable(QString("posterize N=%1 expected ≤ %2 distinct R values, got %3")
+                            .arg(N).arg(N + 2).arg(r_values.size())));
   }
-  QVERIFY2(r_values.size() <= 16, qPrintable(QString("expected ≤16 distinct R values, got %1").arg(r_values.size())));
 }
 
 void TestEffectsGpu::chromakeyTransparent() {
   // chromakey.xml row 0 = Mode (combo, default 0=Composite). Setting Mode=1
-  // (Alpha) explicitly — Composite mode premultiplies and collides with the
-  // final-readback alpha forcing. In Alpha mode, the keyed pixel renders as
-  // vec3(mask=0) → black (0,0,0,255) after compositing.
-  auto seq = h_->make_sequence(64, 64, 30.0);
-  Clip* c = h_->add_generator_clip(seq.get(), -1, 0, 30, EFFECT_INTERNAL_SOLID);
-  h_->set_field_color(c->effects[1].get(), 2, 0, QColor(0, 255, 0, 255));
+  // (Alpha) — keyed pixel renders as vec3(mask=0) → black after compositing.
+  // Iterate over three key colours with a fresh seq+clip+fx per iter to catch
+  // "key channel hardcoded to green" regressions.
+  struct KeyCase {
+    QColor key;
+    const char* name;
+  };
+  const KeyCase cases[] = {
+      {QColor(0, 255, 0), "green"},
+      {QColor(0, 0, 255), "blue"},
+      {QColor(255, 0, 255), "magenta"},
+  };
+  for (const auto& kc : cases) {
+    auto seq = h_->make_sequence(64, 64, 30.0);
+    Clip* c = h_->add_generator_clip(seq.get(), -1, 0, 30, EFFECT_INTERNAL_SOLID);
+    h_->set_field_color(c->effects[1].get(), 2, 0, kc.key);
 
-  EffectPtr fx = h_->attach_xml_shader(c, "Chroma Key");
-  h_->set_field_combo(fx.get(), 0, 0, 1);  // Mode = Alpha
-  QByteArray pixels = h_->render_frame(seq.get(), 0);
+    EffectPtr fx = h_->attach_xml_shader(c, "Chroma Key");
+    h_->set_field_combo(fx.get(), 0, 0, 1);     // Mode = Alpha
+    h_->set_field_color(fx.get(), 1, 0, kc.key);  // Key Color
+    QByteArray pixels = h_->render_frame(seq.get(), 0);
 
-  Rgba mid = pixel_at(pixels, 64, 32, 32);
-  // Started at (0,255,0); after Alpha keying matched pixels = black.
-  const int d = qAbs(mid.r - 0) + qAbs(mid.g - 255) + qAbs(mid.b - 0);
-  QVERIFY2(d > 50,
-           qPrintable(QString("expected chroma key to remove green, got (%1,%2,%3)").arg(mid.r).arg(mid.g).arg(mid.b)));
+    Rgba mid = pixel_at(pixels, 64, 32, 32);
+    QVERIFY2(mid.r < 30 && mid.g < 30 && mid.b < 30,
+             qPrintable(QString("[%1] expected keyed → black, got (%2,%3,%4)")
+                            .arg(kc.name).arg(mid.r).arg(mid.g).arg(mid.b)));
+  }
 }
 
 void TestEffectsGpu::lumakeyBands() {
-  // lumakey.xml row 0=Lower, row 1=Upper. With loc=50, hic=100 on a black→white
-  // vertical gradient: top (luma=0) < 0.5 → alpha=0 → premultiplied black;
-  // bottom (luma=1) — when luma > 1.0 is false, falls into middle branch,
-  // alpha=luma=1 → white kept.
+  // lumakey.xml row 0=Lower, row 1=Upper. With loc=25, hic=75 on a black→white
+  // vertical gradient (slope 1/90.5, offset 13.25): 5 sample y-coords hit the
+  // three branches — below-loc (premultiplied black), in-band (rgb*=luma soft
+  // ramp), above-hic (opaque source preserved). Predicted R 8-bit values
+  // (y=4,20,32,44,60) → (0, 35, 65, 104, 208).
   auto seq = h_->make_sequence(64, 64, 30.0);
   Clip* c = h_->add_generator_clip(seq.get(), -1, 0, 30, EFFECT_INTERNAL_GRADIENT);
   Effect* gradient = c->effects[1].get();
@@ -1452,20 +1500,35 @@ void TestEffectsGpu::lumakeyBands() {
   h_->set_field_double(gradient, 3, 0, 90.0);
 
   EffectPtr fx = h_->attach_xml_shader(c, "Luma Key");
-  h_->set_field_double(fx.get(), 0, 0, 50.0);   // loc
-  h_->set_field_double(fx.get(), 1, 0, 100.0);  // hic
+  h_->set_field_double(fx.get(), 0, 0, 25.0);  // loc
+  h_->set_field_double(fx.get(), 1, 0, 75.0);  // hic
   QByteArray pixels = h_->render_frame(seq.get(), 0);
 
   Rgba top = pixel_at(pixels, 64, 32, 4);
+  Rgba mid1 = pixel_at(pixels, 64, 32, 20);
+  Rgba mid2 = pixel_at(pixels, 64, 32, 32);
+  Rgba mid3 = pixel_at(pixels, 64, 32, 44);
   Rgba bot = pixel_at(pixels, 64, 32, 60);
-  QVERIFY2(qAbs(top.r - bot.r) > 100,
-           qPrintable(QString("expected luma band split, top.r=%1 bot.r=%2").arg(top.r).arg(bot.r)));
+
+  QVERIFY2(top.r < 10,
+           qPrintable(QString("expected below-loc → premultiplied black, top.r=%1").arg(top.r)));
+  QVERIFY2(bot.r > 180,
+           qPrintable(QString("expected above-hic → opaque source preserved, bot.r=%1").arg(bot.r)));
+  QVERIFY2(mid1.r < mid2.r && mid2.r < mid3.r,
+           qPrintable(QString("expected strict monotonic in-band ramp, got (%1,%2,%3)")
+                          .arg(mid1.r).arg(mid2.r).arg(mid3.r)));
+  QVERIFY2(mid1.r > top.r + 10 && mid3.r < bot.r - 10,
+           qPrintable(QString("expected in-band between edges, top=%1 mid1=%2 mid3=%3 bot=%4")
+                          .arg(top.r).arg(mid1.r).arg(mid3.r).arg(bot.r)));
 }
 
 void TestEffectsGpu::despillReducesGreen() {
   // despill.xml default channel=1 (Green), factor=100, balance=0. Shader
   // replaces g with composite(g, avg(r,b,0), 1.0) = min(g, (r+b)/2). For input
-  // (50, 200, 50): avg(50,50)=50; min(200,50)=50. G drops 200→50.
+  // (50, 200, 50): avg(50,50)=50; min(200,50)=50. G drops 200→50. R and B
+  // must be untouched — only the green channel branch writes — so a
+  // "desaturate-all" regression that drops R and B is caught by the new
+  // preservation assertion.
   auto seq = h_->make_sequence(64, 64, 30.0);
   Clip* c = h_->add_generator_clip(seq.get(), -1, 0, 30, EFFECT_INTERNAL_SOLID);
   h_->set_field_color(c->effects[1].get(), 2, 0, QColor(50, 200, 50, 255));
@@ -1474,7 +1537,10 @@ void TestEffectsGpu::despillReducesGreen() {
   QByteArray pixels = h_->render_frame(seq.get(), 0);
 
   Rgba mid = pixel_at(pixels, 64, 32, 32);
-  QVERIFY2(mid.g < 200 - 10, qPrintable(QString("expected G reduced, got G=%1").arg(mid.g)));
+  QVERIFY2(mid.g < 190, qPrintable(QString("expected G reduced, got G=%1").arg(mid.g)));
+  QVERIFY2(qAbs(mid.r - 50) <= 5 && qAbs(mid.b - 50) <= 5,
+           qPrintable(QString("expected R and B preserved at ~50, got (%1,%2,%3)")
+                          .arg(mid.r).arg(mid.g).arg(mid.b)));
 }
 
 // ---------------------------------------------------------------------------
