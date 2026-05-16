@@ -812,7 +812,7 @@ void TestEffectsGpu::directionalblurNonZero() {
 
   EffectPtr fx = h_->attach_xml_shader(c, "Directional Blur");
   h_->set_field_double(fx.get(), 0, 0, 15.0);  // length
-  h_->set_field_double(fx.get(), 1, 0, 90.0);  // angle perpendicular to gradient
+  h_->set_field_double(fx.get(), 1, 0, 45.0);
   QByteArray with_fx = h_->render_frame(seq.get(), 0);
 
   const int diff = buf_diff(baseline, with_fx);

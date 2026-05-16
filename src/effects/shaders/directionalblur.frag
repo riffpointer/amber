@@ -5,14 +5,14 @@
 layout(std140, binding = 1) uniform FragParams {
     vec2 resolution;
     float angle; // degrees
-    float length;
+    float blur_len; // renamed from `length` to avoid GLSL builtin shadowing
 };
 layout(binding = 2) uniform sampler2D image;
 layout(location = 0) out vec4 fragColor;
 
 void main(void) {
-	if (length > 0.0) {
-		float ceillen = ceil(length);
+	if (blur_len > 0.0) {
+		float ceillen = ceil(blur_len);
 		float radians = (angle*M_PI)/180.0;
 		float divider = 1.0 / ceillen;
 		float sin_angle = sin(radians);
