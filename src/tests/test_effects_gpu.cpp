@@ -79,8 +79,11 @@ class TestEffectsGpu : public QObject {
   void huesatbriContrast();
   void colorCorrectionShift();
   void colorselIsolates();
+  void colorselHueRanges();
   void posterizeReducesLevels();
   void chromakeyTransparent();
+  void chromakeyCompositeMode();
+  void chromakeyOriginalMode();
   void lumakeyBands();
   void despillReducesGreen();
 
@@ -1432,6 +1435,72 @@ void TestEffectsGpu::colorselIsolates() {
   }
 }
 
+void TestEffectsGpu::colorselHueRanges() {
+  // colorsel.xml row 0 = Find by (combo, set to 2 = Hue). Row 1 = Lower Limit,
+  // row 2 = Upper Limit. Shader maps HSV.x (degrees) / 3.6 → toCheck in 0..100.
+  // Pure-saturated corners have integer-valued hues (0, 60, 120, 180, 240, 300),
+  // so toCheck is exactly 0, 16.7, 33.3, 50, 66.7, 83.3. Each iteration runs
+  // two sub-scopes: A feeds the target colour with a ±5 window around its hue
+  // (preserved), B feeds a non-target colour against the same window (suppressed
+  // → premultiplied black). Sub-scope B is the passthrough catcher for the slot.
+  struct HueCase {
+    const char* name;
+    QColor target;
+    QColor other;
+    double loc;
+    double hic;
+    // Witness for the *target* (preserved) sub-scope: dominant channel(s) high,
+    // other channels low. Encoded as four expected min/max ranges (r/g/b).
+    int r_min, r_max;
+    int g_min, g_max;
+    int b_min, b_max;
+  };
+  const HueCase cases[] = {
+      {"red",     QColor(255, 0, 0),     QColor(0, 255, 0),  0.0,  5.0,  200, 255,   0,  30,   0,  30},
+      {"green",   QColor(0, 255, 0),     QColor(255, 0, 0),  28.0, 38.0,   0,  30, 200, 255,   0,  30},
+      {"blue",    QColor(0, 0, 255),     QColor(255, 0, 0),  62.0, 72.0,   0,  30,   0,  30, 200, 255},
+      {"yellow",  QColor(255, 255, 0),   QColor(255, 0, 0),  12.0, 22.0, 200, 255, 200, 255,   0,  30},
+      {"magenta", QColor(255, 0, 255),   QColor(255, 0, 0),  78.0, 88.0, 200, 255,   0,  30, 200, 255},
+  };
+  for (const auto& c : cases) {
+    // Sub-scope A: target colour inside the hue window → preserved.
+    {
+      auto seq = h_->make_sequence(64, 64, 30.0);
+      Clip* clip = h_->add_generator_clip(seq.get(), -1, 0, 30, EFFECT_INTERNAL_SOLID);
+      h_->set_field_color(clip->effects[1].get(), 2, 0, c.target);
+      EffectPtr fx = h_->attach_xml_shader(clip, "Color Finder");
+      h_->set_field_combo(fx.get(), 0, 0, 2);    // Find by = Hue
+      h_->set_field_double(fx.get(), 1, 0, c.loc);
+      h_->set_field_double(fx.get(), 2, 0, c.hic);
+      QByteArray pixels = h_->render_frame(seq.get(), 0);
+      Rgba mid = pixel_at(pixels, 64, 32, 32);
+      QVERIFY2(mid.r >= c.r_min && mid.r <= c.r_max && mid.g >= c.g_min && mid.g <= c.g_max &&
+                   mid.b >= c.b_min && mid.b <= c.b_max,
+               qPrintable(QString("[%1] expected target preserved in range r=[%2..%3] g=[%4..%5] b=[%6..%7], got (%8,%9,%10)")
+                              .arg(c.name)
+                              .arg(c.r_min).arg(c.r_max)
+                              .arg(c.g_min).arg(c.g_max)
+                              .arg(c.b_min).arg(c.b_max)
+                              .arg(mid.r).arg(mid.g).arg(mid.b)));
+    }
+    // Sub-scope B: non-target colour against same window → suppressed (black).
+    {
+      auto seq = h_->make_sequence(64, 64, 30.0);
+      Clip* clip = h_->add_generator_clip(seq.get(), -1, 0, 30, EFFECT_INTERNAL_SOLID);
+      h_->set_field_color(clip->effects[1].get(), 2, 0, c.other);
+      EffectPtr fx = h_->attach_xml_shader(clip, "Color Finder");
+      h_->set_field_combo(fx.get(), 0, 0, 2);    // Find by = Hue
+      h_->set_field_double(fx.get(), 1, 0, c.loc);
+      h_->set_field_double(fx.get(), 2, 0, c.hic);
+      QByteArray pixels = h_->render_frame(seq.get(), 0);
+      Rgba mid = pixel_at(pixels, 64, 32, 32);
+      QVERIFY2(mid.r < 30 && mid.g < 30 && mid.b < 30,
+               qPrintable(QString("[%1] expected non-target suppressed → black, got (%2,%3,%4)")
+                              .arg(c.name).arg(mid.r).arg(mid.g).arg(mid.b)));
+    }
+  }
+}
+
 void TestEffectsGpu::posterizeReducesLevels() {
   // Posterize with gamma_cent=100 → gamma=1 → output = floor(c·N)/N. Loop
   // over numColors ∈ {2,4,8}; gradient t-range [0.152, 0.848] yields N (or
@@ -1490,6 +1559,65 @@ void TestEffectsGpu::chromakeyTransparent() {
              qPrintable(QString("[%1] expected keyed → black, got (%2,%3,%4)")
                             .arg(kc.name).arg(mid.r).arg(mid.g).arg(mid.b)));
   }
+}
+
+void TestEffectsGpu::chromakeyCompositeMode() {
+  // chromakey.xml row 0 = Mode (combo, default 0 = Composite). Default key=green
+  // from row 1; do NOT override key_color — the default IS what we want.
+  // Composite mode: matched pixel → alpha=0, rgb premultiplied to (0,0,0);
+  // unmatched pixel → preserved at full alpha. Sub-scope A is load-bearing
+  // against a passthrough regression (green input would survive); sub-scope B
+  // asserts the unmatched branch keeps non-key colours intact.
+  // A: solid green + default key=green + Mode=Composite → premultiplied black.
+  {
+    auto seq = h_->make_sequence(64, 64, 30.0);
+    Clip* c = h_->add_generator_clip(seq.get(), -1, 0, 30, EFFECT_INTERNAL_SOLID);
+    h_->set_field_color(c->effects[1].get(), 2, 0, QColor(0, 255, 0, 255));
+    EffectPtr fx = h_->attach_xml_shader(c, "Chroma Key");
+    h_->set_field_combo(fx.get(), 0, 0, 0);  // Mode = Composite
+    QByteArray pixels = h_->render_frame(seq.get(), 0);
+    Rgba mid = pixel_at(pixels, 64, 32, 32);
+    QVERIFY2(mid.r < 30 && mid.g < 30 && mid.b < 30,
+             qPrintable(QString("expected green keyed → premultiplied black, got (%1,%2,%3)")
+                            .arg(mid.r).arg(mid.g).arg(mid.b)));
+  }
+  // B: solid red + default key=green + Mode=Composite → red preserved.
+  {
+    auto seq = h_->make_sequence(64, 64, 30.0);
+    Clip* c = h_->add_generator_clip(seq.get(), -1, 0, 30, EFFECT_INTERNAL_SOLID);
+    h_->set_field_color(c->effects[1].get(), 2, 0, QColor(255, 0, 0, 255));
+    EffectPtr fx = h_->attach_xml_shader(c, "Chroma Key");
+    h_->set_field_combo(fx.get(), 0, 0, 0);  // Mode = Composite
+    QByteArray pixels = h_->render_frame(seq.get(), 0);
+    Rgba mid = pixel_at(pixels, 64, 32, 32);
+    QVERIFY2(mid.r > 200 && mid.g < 30 && mid.b < 30,
+             qPrintable(QString("expected red preserved (non-key), got (%1,%2,%3)")
+                            .arg(mid.r).arg(mid.g).arg(mid.b)));
+  }
+}
+
+void TestEffectsGpu::chromakeyOriginalMode() {
+  // chromakey.xml Mode=2 (Original) is a no-op branch by spec — texture_color
+  // passes through unchanged. This slot does NOT catch passthrough regressions
+  // of Original mode itself (Original IS passthrough) — it catches MODE-CONFUSION
+  // regressions where mode=2 wrongly executes the mode=0 (Composite, would emit
+  // black for matching pixels, premultiplied rgb for non-matching) or mode=1
+  // (Alpha, would emit mask grey ≈ white) branch.
+  //
+  // Input (50, 200, 100): far from key=green (0,255,0) in YCbCr; if Composite
+  // wrongly fired, mask≈1 and we'd see premultiplied rgb ≈ input — so the
+  // safer regression target here is mode=1 (Alpha) which would output ≈ white.
+  // We assert the input is preserved within ±5 per channel.
+  auto seq = h_->make_sequence(64, 64, 30.0);
+  Clip* c = h_->add_generator_clip(seq.get(), -1, 0, 30, EFFECT_INTERNAL_SOLID);
+  h_->set_field_color(c->effects[1].get(), 2, 0, QColor(50, 200, 100, 255));
+  EffectPtr fx = h_->attach_xml_shader(c, "Chroma Key");
+  h_->set_field_combo(fx.get(), 0, 0, 2);  // Mode = Original (no-op)
+  QByteArray pixels = h_->render_frame(seq.get(), 0);
+  Rgba mid = pixel_at(pixels, 64, 32, 32);
+  QVERIFY2(qAbs(mid.r - 50) <= 5 && qAbs(mid.g - 200) <= 5 && qAbs(mid.b - 100) <= 5,
+           qPrintable(QString("expected input unchanged (50,200,100), got (%1,%2,%3)")
+                          .arg(mid.r).arg(mid.g).arg(mid.b)));
 }
 
 void TestEffectsGpu::lumakeyBands() {
