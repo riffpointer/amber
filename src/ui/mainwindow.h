@@ -328,6 +328,7 @@ class MainWindow : public QMainWindow {
   QAction* shuttle_stop_;
   QAction* shuttle_right_;
   QAction* loop_action_;
+  QAction* keep_playhead_centered_action_;
 
   // window menu
 

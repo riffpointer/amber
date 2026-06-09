@@ -25,6 +25,7 @@
 #include <QPushButton>
 #include <QTime>
 #include <QVector>
+#include <QLineEdit>
 
 #include "core/selection.h"
 #include "engine/clip.h"
@@ -153,6 +154,14 @@ public:
   void update_effect_controls();
   bool showing_all{false};
   double old_zoom;
+
+  // Search find bar
+  QLineEdit* find_bar{nullptr};
+  QString search_query;
+  void show_find_bar();
+  void filter_timeline(const QString& query);
+  void jump_to_first_match();
+  bool eventFilter(QObject* watched, QEvent* event) override;
 
   int GetTrackHeight(int track);
   void SetTrackHeight(int track, int height);
@@ -325,7 +334,10 @@ public:
 
   QWidget* timeline_area_widget;
   TimelineWidget* timeline_area;
+  TrackHeaderWidget* track_headers;
   QWidget* editAreas;
+  QWidget* headerContainer;
+  QWidget* scrollBarContainer;
   QScrollBar* verticalScrollbar;
   QPushButton* zoomInButton;
   QPushButton* zoomOutButton;

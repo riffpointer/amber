@@ -830,6 +830,10 @@ void MainWindow::setup_menus() {
   loop_action_->setCheckable(true);
   loop_action_->setData(reinterpret_cast<quintptr>(&amber::CurrentConfig.loop));
 
+  keep_playhead_centered_action_ = MenuHelper::create_menu_action(playback_menu, "keepplayheadcentered", &amber::MenuHelper, SLOT(toggle_bool_action()));
+  keep_playhead_centered_action_->setCheckable(true);
+  keep_playhead_centered_action_->setData(reinterpret_cast<quintptr>(&amber::CurrentConfig.keep_playhead_centered));
+
   // INITIALIZE WINDOW MENU
 
   window_menu = MenuHelper::create_submenu(menuBar, this, SLOT(windowMenu_About_To_Be_Shown()));
@@ -1090,6 +1094,7 @@ void MainWindow::Retranslate() {
   shuttle_right_->setText(tr("Shuttle Right"));
 
   loop_action_->setText(tr("Loop"));
+  keep_playhead_centered_action_->setText(tr("Keep Playhead Centered"));
 
   window_menu->setTitle(tr("&Window"));
 
@@ -1334,7 +1339,10 @@ void MainWindow::windowMenu_About_To_Be_Shown() {
   }
 }
 
-void MainWindow::playbackMenu_About_To_Be_Shown() { amber::MenuHelper.set_bool_action_checked(loop_action_); }
+void MainWindow::playbackMenu_About_To_Be_Shown() {
+  amber::MenuHelper.set_bool_action_checked(loop_action_);
+  amber::MenuHelper.set_bool_action_checked(keep_playhead_centered_action_);
+}
 
 void MainWindow::viewMenu_About_To_Be_Shown() {
   amber::MenuHelper.set_bool_action_checked(track_lines);

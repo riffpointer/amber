@@ -33,6 +33,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QHeaderView>
 #include <QList>
 #include <QMediaDevices>
 #include <QMenuBar>
@@ -708,6 +709,11 @@ void PreferencesDialog::setup_ui() {
   AddBoolPair(clip_outline_on_move_only, &amber::CurrentConfig.clip_outline_on_move_only);
   behavior_tab_layout->Add(clip_outline_on_move_only);
 
+  QCheckBox* drag_show_clip_content = new QCheckBox(tr("Show Clip Content While Dragging"));
+  drag_show_clip_content->setToolTip(tr("When enabled, dragging or trimming a clip renders the full clip body (colour, waveform/thumbnail, and name label) at the ghost position instead of a plain yellow outline.\n\nThe same smooth easing that animates the outline also applies to the clip bounds and position, so the clip content glides to its new location. Requires \"Animate Clip Snapping\" to be on for the easing effect."));
+  AddBoolPair(drag_show_clip_content, &amber::CurrentConfig.drag_show_clip_content);
+  behavior_tab_layout->Add(drag_show_clip_content);
+
   QWidget* frame_skip_row = new QWidget(behavior_tab);
   QHBoxLayout* frame_skip_layout = new QHBoxLayout(frame_skip_row);
   frame_skip_layout->setContentsMargins(0, 0, 0, 0);
@@ -957,6 +963,9 @@ void PreferencesDialog::setup_ui() {
   shortcut_layout->addWidget(key_search_line);
 
   keyboard_tree = new QTreeWidget(shortcut_tab);
+  keyboard_tree->header()->setStretchLastSection(false);
+  keyboard_tree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+  keyboard_tree->header()->setSectionResizeMode(1, QHeaderView::Interactive);
   QTreeWidgetItem* tree_header = keyboard_tree->headerItem();
   tree_header->setText(0, tr("Action"));
   tree_header->setText(1, tr("Shortcut"));

@@ -173,6 +173,7 @@ Project::Project(QWidget* parent) : Panel(parent), sorter(this), sources_common(
   // tree view
   tree_view = new SourceTable(sources_common);
   tree_view->project_parent = this;
+  tree_view->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
   tree_view->setModel(&sorter);
   verticalLayout->addWidget(tree_view);
 

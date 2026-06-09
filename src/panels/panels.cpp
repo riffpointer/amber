@@ -116,7 +116,7 @@ void free_panels() {
 }
 
 void scroll_to_frame_internal(QScrollBar* bar, long frame, double zoom, int area_width) {
-  if (bar->value() == bar->minimum() || bar->value() == bar->maximum()) {
+  if (bar->minimum() == bar->maximum()) {
     return;
   }
 

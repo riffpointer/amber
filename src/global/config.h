@@ -343,6 +343,13 @@ struct Config {
   bool hover_focus{false};
 
   /**
+   * @brief Keep playhead centered
+   *
+   * **TRUE** to keep the playhead centered on the timeline at all times.
+   */
+  bool keep_playhead_centered{false};
+
+  /**
    * @brief Project view type
    *
    * Whether to show media in the Project panel as a tree hierarchy or as a browser of icons.
@@ -701,6 +708,18 @@ struct Config {
    * while the clip is actively being dragged/moved. **FALSE** draws it always.
    */
   bool clip_outline_on_move_only{false};
+
+  /**
+   * @brief Show live clip content while dragging / resizing
+   *
+   * When **TRUE**, dragging or trimming a clip renders the full clip body
+   * (background gradient, waveform/thumbnail, and label) at the ghost position
+   * rather than a plain yellow outline. The same lerp easing that animates the
+   * ghost outline is applied to the clip bounds and position, so the clip
+   * content smoothly follows the cursor. **FALSE** restores the classic
+   * yellow-outline ghost behaviour.
+   */
+  bool drag_show_clip_content{false};
 
   /**
    * @brief Load config from file

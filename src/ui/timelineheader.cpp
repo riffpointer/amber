@@ -45,6 +45,7 @@
 #include "ui/colorlabel.h"
 #include "ui/menu.h"
 #include "ui/menuhelper.h"
+#include "ui/timelinewidget.h"
 #include "ui/styling.h"
 
 constexpr int CLICK_RANGE = 5;
@@ -218,6 +219,16 @@ void TimelineHeader::mousePressEvent(QMouseEvent* event) {
     set_playhead(pos.x());
   }
   dragging = true;
+
+  int mouse_x = pos.x();
+  last_mouse_x_ = mouse_x;
+  if (!resizing_workarea && !dragging_markers) {
+    if (mouse_x < 25 || mouse_x > width() - 25) {
+      if (scroll_timer_id_ == -1) {
+        scroll_timer_id_ = startTimer(16);
+      }
+    }
+  }
 }
 
 void TimelineHeader::move_drag_workarea(int mouse_x) {
@@ -522,6 +533,11 @@ void TimelineHeader::paint_markers(QPainter& p, int yoff, int h) {
   if (viewer->marker_ref == nullptr) return;
   for (int mi = 0; mi < viewer->marker_ref->size(); mi++) {
     const Marker& m = viewer->marker_ref->at(mi);
+    if (panel_timeline != nullptr && !panel_timeline->search_query.isEmpty()) {
+      if (!m.name.contains(panel_timeline->search_query, Qt::CaseInsensitive)) {
+        continue;
+      }
+    }
     int marker_x = getHeaderScreenPointFromFrame(m.frame);
     bool selected = false;
     for (int s : selected_markers) {
@@ -565,7 +581,7 @@ void TimelineHeader::paintEvent(QPaintEvent*) {
   path.lineTo(in_x - PLAYHEAD_SIZE, yoff);
   path.lineTo(in_x + PLAYHEAD_SIZE + 1, yoff);
   path.lineTo(start);
-  p.fillPath(path, Qt::red);
+  p.fillPath(path, timeline_playhead_snap_flash() ? QColor(255, 215, 0) : Qt::red);
 
   p.setPen(Qt::gray);
   p.drawLine(0, 0, w, 0);

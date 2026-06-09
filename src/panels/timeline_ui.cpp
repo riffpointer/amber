@@ -194,21 +194,39 @@ void Timeline::setup_ui() {
   timeline_area_layout->addWidget(timeline_placeholder_label);
 
   headers = new TimelineHeader();
-  timeline_area_layout->addWidget(headers);
+
+  headerContainer = new QWidget();
+  QHBoxLayout* headerContainerLayout = new QHBoxLayout(headerContainer);
+  headerContainerLayout->setSpacing(0);
+  headerContainerLayout->setContentsMargins(0, 0, 0, 0);
+  QWidget* headerSpacer = new QWidget();
+  headerSpacer->setFixedWidth(130);
+  headerContainerLayout->addWidget(headerSpacer);
+  headerContainerLayout->addWidget(headers);
+  timeline_area_layout->addWidget(headerContainer);
 
   editAreas = new QWidget();
   QHBoxLayout* editAreaLayout = new QHBoxLayout(editAreas);
   editAreaLayout->setSpacing(0);
   editAreaLayout->setContentsMargins(0, 0, 0, 0);
 
+  timeline_area = new TimelineWidget();
+  timeline_area->setFocusPolicy(Qt::ClickFocus);
+
+  track_headers = new TrackHeaderWidget();
+  track_headers->timeline_widget = timeline_area;
+  timeline_area->track_headers = track_headers;
+
+  editAreaLayout->addWidget(track_headers);
+
   QWidget* timelineContainer = new QWidget();
   QHBoxLayout* timelineContainerLayout = new QHBoxLayout(timelineContainer);
   timelineContainerLayout->setSpacing(0);
   timelineContainerLayout->setContentsMargins(0, 0, 0, 0);
-
-  timeline_area = new TimelineWidget();
-  timeline_area->setFocusPolicy(Qt::ClickFocus);
   timelineContainerLayout->addWidget(timeline_area);
+
+  timeline_placeholder_label->setAcceptDrops(true);
+  timeline_placeholder_label->installEventFilter(timeline_area);
 
   verticalScrollbar = new QScrollBar();
   verticalScrollbar->setMaximum(0);
@@ -225,7 +243,16 @@ void Timeline::setup_ui() {
   horizontalScrollBar->setSingleStep(20);
   horizontalScrollBar->setOrientation(Qt::Horizontal);
 
-  timeline_area_layout->addWidget(horizontalScrollBar);
+  scrollBarContainer = new QWidget();
+  QHBoxLayout* scrollBarContainerLayout = new QHBoxLayout(scrollBarContainer);
+  scrollBarContainerLayout->setSpacing(0);
+  scrollBarContainerLayout->setContentsMargins(0, 0, 0, 0);
+  QWidget* scrollBarSpacer = new QWidget();
+  scrollBarSpacer->setFixedWidth(130);
+  scrollBarContainerLayout->addWidget(scrollBarSpacer);
+  scrollBarContainerLayout->addWidget(horizontalScrollBar);
+
+  timeline_area_layout->addWidget(scrollBarContainer);
 
   timelineSplitter->addWidget(timeline_area_widget);
 
@@ -277,9 +304,14 @@ void Timeline::Retranslate() {
   UpdateTitle();
 }
 
-void Timeline::resizeEvent(QResizeEvent*) {
+void Timeline::resizeEvent(QResizeEvent* event) {
   // adjust maximum scrollbar
   if (amber::ActiveSequence != nullptr) set_sb_max();
+
+  if (find_bar && find_bar->isVisible()) {
+    int margin = 10;
+    find_bar->move(timeline_area_widget->width() - find_bar->width() - margin, margin);
+  }
 
   // resize tool button widget to its contents
   QList<QWidget*> tool_button_children = tool_button_widget->findChildren<QWidget*>();
@@ -313,20 +345,25 @@ void Timeline::repaint_timeline() {
   panel_height_dirty_ = true;
   if (!block_repaints) {
     if (amber::ActiveSequence != nullptr && !horizontalScrollBar->isSliderDown() &&
-        !horizontalScrollBar->is_resizing() && panel_sequence_viewer->playing && !zoom_just_changed) {
-      // auto scroll — setValue triggers a recursive repaint_timeline() via setScroll,
-      // so the widgets will be updated in that recursive call
-      if (amber::CurrentConfig.autoscroll == amber::AUTOSCROLL_PAGE_SCROLL) {
-        int playhead_x = getTimelineScreenPointFromFrame(amber::ActiveSequence->playhead);
-        if (playhead_x < 0 || playhead_x > (editAreas->width() - verticalScrollbar->width())) {
-          int old_scroll = horizontalScrollBar->value();
-          horizontalScrollBar->setValue(getScreenPointFromFrame(zoom, amber::ActiveSequence->playhead));
-          if (horizontalScrollBar->value() != old_scroll) return;
+        !horizontalScrollBar->is_resizing() && !hand_moving && !zoom_just_changed) {
+      if (panel_sequence_viewer->playing) {
+        // auto scroll — setValue triggers a recursive repaint_timeline() via setScroll,
+        // so the widgets will be updated in that recursive call
+        if (amber::CurrentConfig.keep_playhead_centered ||
+            amber::CurrentConfig.autoscroll == amber::AUTOSCROLL_SMOOTH_SCROLL) {
+          if (center_scroll_to_playhead(horizontalScrollBar, zoom, amber::ActiveSequence->playhead)) {
+            return;
+          }
+        } else if (amber::CurrentConfig.autoscroll == amber::AUTOSCROLL_PAGE_SCROLL) {
+          int playhead_x = getTimelineScreenPointFromFrame(amber::ActiveSequence->playhead);
+          if (playhead_x < 0 || playhead_x > (editAreas->width() - verticalScrollbar->width())) {
+            int old_scroll = horizontalScrollBar->value();
+            horizontalScrollBar->setValue(getScreenPointFromFrame(zoom, amber::ActiveSequence->playhead));
+            if (horizontalScrollBar->value() != old_scroll) return;
+          }
         }
-      } else if (amber::CurrentConfig.autoscroll == amber::AUTOSCROLL_SMOOTH_SCROLL) {
-        if (center_scroll_to_playhead(horizontalScrollBar, zoom, amber::ActiveSequence->playhead)) {
-          return;
-        }
+      } else if (amber::CurrentConfig.keep_playhead_centered) {
+        center_scroll_to_playhead(horizontalScrollBar, zoom, amber::ActiveSequence->playhead);
       }
     }
 
@@ -353,9 +390,9 @@ void Timeline::update_sequence() {
   headers->setEnabled(!null_sequence);
 
   timeline_placeholder_label->setVisible(null_sequence);
-  headers->setVisible(!null_sequence);
+  headerContainer->setVisible(!null_sequence);
   editAreas->setVisible(!null_sequence);
-  horizontalScrollBar->setVisible(!null_sequence);
+  scrollBarContainer->setVisible(!null_sequence);
 
   // Update breadcrumb
   const auto& history = amber::Global->sequence_history();

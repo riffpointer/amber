@@ -147,6 +147,7 @@ class EffectControls : public Panel {
   KeyframeView* keyframeView;
   QWidget* vcontainer;
   QWidget* acontainer;
+  QLabel* no_clip_label;
 };
 
 #endif  // EFFECTCONTROLS_H

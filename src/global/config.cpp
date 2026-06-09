@@ -90,6 +90,8 @@ constexpr BoolEntry kBoolEntries[] = {
     {"StickyKeyframeType", &Config::sticky_keyframe_type},
     {"SnapAnimation", &Config::snap_animation},
     {"ClipOutlineOnMoveOnly", &Config::clip_outline_on_move_only},
+    {"DragShowClipContent", &Config::drag_show_clip_content},
+    {"KeepPlayheadCentered", &Config::keep_playhead_centered},
 };
 
 constexpr IntEntry kIntEntries[] = {
@@ -247,6 +249,7 @@ void Config::save(QString path) {
   stream.writeTextElement("UpcomingFrameQueueSize", QString::number(upcoming_queue_size));
   stream.writeTextElement("UpcomingFrameQueueType", QString::number(upcoming_queue_type));
   stream.writeTextElement("Loop", QString::number(loop));
+  stream.writeTextElement("KeepPlayheadCentered", QString::number(keep_playhead_centered));
   stream.writeTextElement("SeekAlsoSelects", QString::number(seek_also_selects));
   stream.writeTextElement("AutoSeekToBeginning", QString::number(auto_seek_to_beginning));
   stream.writeTextElement("CSSPath", css_path);
@@ -284,6 +287,7 @@ void Config::save(QString path) {
   stream.writeTextElement("DefaultKeyframeType", QString::number(default_keyframe_type));
   stream.writeTextElement("SnapAnimation", QString::number(snap_animation));
   stream.writeTextElement("ClipOutlineOnMoveOnly", QString::number(clip_outline_on_move_only));
+  stream.writeTextElement("DragShowClipContent", QString::number(drag_show_clip_content));
 
   stream.writeEndElement();   // configuration
   stream.writeEndDocument();  // doc
