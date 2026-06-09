@@ -369,6 +369,9 @@ void Timeline::repaint_timeline() {
 
     headers->repaint();
     timeline_area->repaint();
+    if (track_headers) {
+      track_headers->repaint();
+    }
 
     if (amber::ActiveSequence != nullptr && !zoom_just_changed) {
       set_sb_max();
@@ -388,6 +391,9 @@ void Timeline::update_sequence() {
   recordButton->setEnabled(!null_sequence);
   addButton->setEnabled(!null_sequence);
   headers->setEnabled(!null_sequence);
+  if (track_headers) {
+    track_headers->setEnabled(!null_sequence);
+  }
 
   timeline_placeholder_label->setVisible(null_sequence);
   headerContainer->setVisible(!null_sequence);

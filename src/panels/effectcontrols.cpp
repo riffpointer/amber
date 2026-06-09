@@ -492,14 +492,14 @@ void EffectControls::Retranslate() {
   panel_name = tr("Effects: ");
 
   btnAddVideoEffect->setToolTip(tr("Add Video Effect"));
-  lblVideoEffects->setText(tr("VIDEO EFFECTS"));
+  lblVideoEffects->setText(tr("Video Effects"));
   btnAddVideoTransition->setToolTip(tr("Add Video Transition"));
   btnAddAudioEffect->setToolTip(tr("Add Audio Effect"));
-  lblAudioEffects->setText(tr("AUDIO EFFECTS"));
+  lblAudioEffects->setText(tr("Audio Effects"));
   btnAddAudioTransition->setToolTip(tr("Add Audio Transition"));
 
   if (no_clip_label) {
-    no_clip_label->setText(tr("no clip selected. select a clip to see it's effects here"));
+    no_clip_label->setText(tr("No clip selected. Select a clip to see its effects here"));
   }
 
   UpdateTitle();

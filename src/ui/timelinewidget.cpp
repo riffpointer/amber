@@ -1440,6 +1440,9 @@ void TimelineWidget::mouseMoveMovingInit(QMouseEvent* event) {
     }
     panel_timeline->drag_y_start = event->position().toPoint().y();
     update();
+    if (track_headers) {
+      track_headers->update();
+    }
   } else if (panel_timeline->moving_proc) {
     update_ghosts(event->position().toPoint(), event->modifiers() & Qt::ShiftModifier);
   } else {
@@ -1950,6 +1953,9 @@ int TimelineWidget::getClipIndexFromCoords(long frame, int track) {
 void TimelineWidget::setScroll(int s) {
   scroll = s;
   update();
+  if (track_headers) {
+    track_headers->update();
+  }
 }
 
 void TimelineWidget::timerEvent(QTimerEvent* event) {
@@ -2033,35 +2039,60 @@ void TrackHeaderWidget::paintEvent(QPaintEvent* event) {
 
 void TrackHeaderWidget::drawTrackHeader(QPainter& p, int track_idx, int y, int h, bool is_video) {
   p.save();
-  p.setPen(QPen(QColor(40, 40, 40), 1));
-  p.setBrush(QColor(50, 50, 50));
-  p.drawRect(0, y, width(), h);
+  p.setRenderHint(QPainter::Antialiasing);
 
-  // Draw track name
+  QRect rect(0, y, width(), h);
+  QLinearGradient bgGrad(rect.topLeft(), rect.bottomLeft());
+  bgGrad.setColorAt(0.0, QColor(48, 48, 51));
+  bgGrad.setColorAt(1.0, QColor(40, 40, 42));
+  p.fillRect(rect, bgGrad);
+
+  p.setPen(QPen(QColor(28, 28, 30), 1));
+  p.drawLine(0, y + h - 1, width(), y + h - 1);
+  p.drawLine(width() - 1, y, width() - 1, y + h);
+
+  p.fillRect(QRect(0, y, 4, h - 1), is_video ? QColor(0, 162, 232) : QColor(34, 177, 76));
+
   QString name = (is_video ? "V" : "A") + QString::number(is_video ? -track_idx : (track_idx + 1));
-  p.setPen(Qt::white);
-  p.drawText(QRect(10, y, 35, h), Qt::AlignVCenter | Qt::AlignLeft, name);
+  QFont font = p.font();
+  font.setBold(true);
+  font.setPointSize(9);
+  p.setFont(font);
+  p.setPen(QColor(220, 220, 225));
+  p.drawText(QRect(12, y, 35, h), Qt::AlignVCenter | Qt::AlignLeft, name);
 
-  // Draw buttons
   int btn_y = y + (h - 22) / 2;
-  drawButton(p, QRect(45, btn_y, 22, 22), "M", muted_tracks.contains(track_idx), QColor(220, 80, 80));
-  drawButton(p, QRect(72, btn_y, 22, 22), "S", soloed_tracks.contains(track_idx), QColor(80, 220, 80));
-  drawButton(p, QRect(99, btn_y, 22, 22), "L", locked_tracks.contains(track_idx), QColor(220, 180, 80));
+  drawButton(p, QRect(48, btn_y, 22, 22), "M", muted_tracks.contains(track_idx), QColor(220, 80, 80));
+  drawButton(p, QRect(75, btn_y, 22, 22), "S", soloed_tracks.contains(track_idx), QColor(80, 220, 80));
+  drawButton(p, QRect(102, btn_y, 22, 22), "L", locked_tracks.contains(track_idx), QColor(220, 180, 80));
   p.restore();
 }
 
 void TrackHeaderWidget::drawButton(QPainter& p, const QRect& r, const QString& text, bool active, const QColor& active_color) {
   p.save();
+  p.setRenderHint(QPainter::Antialiasing);
+
   if (active) {
-    p.setBrush(active_color);
-    p.setPen(Qt::NoPen);
+    QLinearGradient grad(r.topLeft(), r.bottomLeft());
+    grad.setColorAt(0.0, active_color);
+    grad.setColorAt(1.0, active_color.darker(130));
+    p.setBrush(grad);
+    p.setPen(QPen(active_color.darker(150), 1));
   } else {
-    p.setBrush(QColor(40, 40, 40));
-    p.setPen(QPen(QColor(80, 80, 80), 1));
+    QLinearGradient grad(r.topLeft(), r.bottomLeft());
+    grad.setColorAt(0.0, QColor(58, 58, 62));
+    grad.setColorAt(1.0, QColor(42, 42, 45));
+    p.setBrush(grad);
+    p.setPen(QPen(QColor(30, 30, 32), 1));
   }
   p.drawRoundedRect(r, 4, 4);
 
-  p.setPen(active ? Qt::white : QColor(200, 200, 200));
+  QFont font = p.font();
+  font.setBold(true);
+  font.setPointSize(8);
+  p.setFont(font);
+
+  p.setPen(active ? Qt::white : QColor(180, 180, 185));
   p.drawText(r, Qt::AlignCenter, text);
   p.restore();
 }
@@ -2074,7 +2105,6 @@ void TrackHeaderWidget::mousePressEvent(QMouseEvent* event) {
 
   QPoint pos = event->position().toPoint();
 
-  // Find which track was clicked
   int clicked_track = 9999;
   int track_y = 0;
   int track_h = 0;
@@ -2102,10 +2132,9 @@ void TrackHeaderWidget::mousePressEvent(QMouseEvent* event) {
 
   if (clicked_track != 9999) {
     int btn_y = track_y + (track_h - 22) / 2;
-    // Check which button was clicked
-    QRect mute_rect(45, btn_y, 22, 22);
-    QRect solo_rect(72, btn_y, 22, 22);
-    QRect lock_rect(99, btn_y, 22, 22);
+    QRect mute_rect(48, btn_y, 22, 22);
+    QRect solo_rect(75, btn_y, 22, 22);
+    QRect lock_rect(102, btn_y, 22, 22);
 
     if (mute_rect.contains(pos)) {
       if (muted_tracks.contains(clicked_track)) {
